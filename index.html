@@ -19,7 +19,11 @@ code{background:#f6f6f6;padding:0 .35rem;border-radius:6px}
 <script>
 const CLIENT_ID="7xi2njzywyo96uuk3wvtpdapykdqrw"
 const REDIRECT_URI="https://omnescient.github.io/TwitchChatUserGenerator/"
-const SCOPES=["channel:read:subscriptions","moderation:read","moderator:read:vip"]
+const SCOPES = [
+  "channel:read:subscriptions",
+  "moderation:read",
+  "channel:read:vips"
+];
 function buildAuthUrl(){
 const u=new URL("https://id.twitch.tv/oauth2/authorize")
 u.searchParams.set("client_id",CLIENT_ID)

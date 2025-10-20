@@ -22,17 +22,133 @@ code{background:#f6f6f6;padding:0 .35rem;border-radius:6px}
 const CLIENT_ID="7xi2njzywyo96uuk3wvtpdapykdqrw"
 const REDIRECT_URI="https://omnescient.github.io/TwitchChatUserGenerator/"
 const SCOPES=["channel:read:subscriptions","moderation:read","channel:read:vips","moderator:read:followers"]
-function buildAuthUrl(){const u=new URL("https://id.twitch.tv/oauth2/authorize");u.searchParams.set("client_id",CLIENT_ID);u.searchParams.set("redirect_uri",REDIRECT_URI);u.searchParams.set("response_type","token");u.searchParams.set("scope",SCOPES.join(" "));u.searchParams.set("force_verify","true");return u.toString()}
-function parseHashToken(){if(!location.hash)return null;const p=new URLSearchParams(location.hash.slice(1));const t=p.get("access_token");const s=p.get("scope");const ty=p.get("token_type");return t?{access_token:t,scope:s,token_type:ty}:null}
+
+function buildAuthUrl(){
+  const u=new URL("https://id.twitch.tv/oauth2/authorize")
+  u.searchParams.set("client_id",CLIENT_ID)
+  u.searchParams.set("redirect_uri",REDIRECT_URI)
+  u.searchParams.set("response_type","token")
+  u.searchParams.set("scope",SCOPES.join(" "))
+  u.searchParams.set("force_verify","true")
+  return u.toString()
+}
+
+function parseHashToken(){
+  if(!location.hash)return null
+  const p=new URLSearchParams(location.hash.slice(1))
+  const t=p.get("access_token")
+  return t?{access_token:t}:null
+}
+
 function clearHash(){history.replaceState(null,"",location.pathname+location.search)}
-async function helix(u,t){const r=await fetch(u,{headers:{"Client-ID":CLIENT_ID,"Authorization":`Bearer ${t}`}});if(!r.ok)throw new Error(`${r.status} ${r.statusText}`);return await r.json()}
-async function helixPaged(u,t){let o=[],a=null;do{const f=a?(u+(u.includes("?")?"&":"?")+"after="+encodeURIComponent(a)):u;const j=await helix(f,t);if(j.data)o=o.concat(j.data);a=j.pagination&&j.pagination.cursor?j.pagination.cursor:null}while(a);return o}
-function toUsersTxt(r,p){const a=Array.from(r.values()).sort((a,b)=>a.name.toLowerCase().localeCompare(b.name.toLowerCase()));const l=[];for(const e of a){const g=e.tags;let t="";if(g.has("staff"))t+="[staff]";if(g.has("mod"))t+="[mod]";if(g.has("vip"))t+="[vip]";if(g.has("sub")){t+="[sub]";if(p.has(e.id))t+="[prime]"}l.push(t?`${t} ${e.name}`:e.name)}return l.join("\n")+"\n"}
+
+async function helix(u,t){
+  const r=await fetch(u,{headers:{"Client-ID":CLIENT_ID,"Authorization":`Bearer ${t}`}})
+  if(!r.ok)throw new Error(`${r.status} ${r.statusText}`)
+  return await r.json()
+}
+
+async function helixPaged(u,t){
+  let o=[],a=null
+  do{
+    const f=a?(u+(u.includes("?")?"&":"?")+"after="+encodeURIComponent(a)):u
+    const j=await helix(f,t)
+    if(j.data)o=o.concat(j.data)
+    a=j.pagination&&j.pagination.cursor?j.pagination.cursor:null
+  }while(a)
+  return o
+}
+
+function toUsersTxt(r,p){
+  const a=Array.from(r.values()).sort((a,b)=>a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
+  const l=[]
+  for(const e of a){
+    const g=e.tags
+    let t=""
+    if(g.has("staff"))t+="[staff]"
+    if(g.has("mod"))t+="[mod]"
+    if(g.has("vip"))t+="[vip]"
+    if(g.has("sub")){t+="[sub]";if(p.has(e.id))t+="[prime]"}
+    l.push(t?`${t} ${e.name}`:e.name)
+  }
+  return l.join("\n")+"\n"
+}
+
 async function copyText(x){await navigator.clipboard.writeText(x)}
-function log(m,c=""){const el=document.getElementById("log");const d=document.createElement("div");if(c)d.className=c;d.textContent=m;el.appendChild(d)}
-async function run(){const t=parseHashToken();if(!t)return;clearHash();document.getElementById("connect").classList.add("hidden");try{log("Connexion validée / Login successful","ok");const me=await helix("https://api.twitch.tv/helix/users",t.access_token);const u=me.data[0];const id=u.id;const name=u.display_name||u.login;log(`Compte: ${name} (ID ${id}) / Account: ${name}`,"muted");log("Followers…");const followers=await helixPaged(`https://api.twitch.tv/helix/channels/followers?broadcaster_id=${id}`,t.access_token);log(`Followers: ${followers.length}`,"ok");log("Abonnements / Subs…");const subs=await helixPaged(`https://api.twitch.tv/helix/subscriptions?broadcaster_id=${id}`,t.access_token);log(`Subs: ${subs.length}`,"ok");log("Modérateurs / Moderators…");const mods=await helixPaged(`https://api.twitch.tv/helix/moderation/moderators?broadcaster_id=${id}&user_id=${id}`,t.access_token);log(`Mods: ${mods.length}`,"ok");log("VIPs…");let vips=[];try{vips=await helixPaged(`https://api.twitch.tv/helix/channels/vips?broadcaster_id=${id}&user_id=${id}`,t.access_token);log(`VIPs: ${vips.length}`,"ok")}catch(e){log("VIPs: accès refusé / access denied (ignoré)","muted")}
-const prime=new Set(subs.filter(s=>s.tier==="1000").map(s=>s.user_id));const roles=new Map();const mark=(i,n,g)=>{if(!roles.has(i))roles.set(i,{id:i,name:n,tags:new Set()});if(g)roles.get(i).tags.add(g)};followers.forEach(f=>mark(f.user_id,f.user_name,null));mods.forEach(m=>mark(m.user_id,m.user_name,"mod"));vips.forEach(v=>mark(v.user_id,v.user_name,"vip"));subs.forEach(s=>mark(s.user_id,s.user_name,"sub"));const txt=toUsersTxt(roles,prime);await copyText(txt);document.getElementById("copied").classList.remove("hidden");document.getElementById("preview").value=txt;document.getElementById("previewWrap").classList.remove("hidden");log("Copié dans le presse-papiers / Copied to clipboard ✅","ok")}catch(e){console.error(e);log("Erreur / Error: "+e.message,"err");document.getElementById("connect").classList.remove("hidden")}}
-window.addEventListener("DOMContentLoaded",()=>{document.getElementById("run").addEventListener("click",()=>{location.href=buildAuthUrl()});if(parseHashToken())run();document.getElementById("copyBtn").addEventListener("click",async()=>{const v=document.getElementById("preview").value;await copyText(v);document.getElementById("copied").classList.remove("hidden")})})
+
+function log(m,c=""){
+  const el=document.getElementById("log")
+  const d=document.createElement("div")
+  if(c)d.className=c
+  d.textContent=m
+  el.appendChild(d)
+}
+
+async function run(){
+  const t=parseHashToken()
+  if(!t)return
+  clearHash()
+  document.getElementById("connect").classList.add("hidden")
+  try{
+    log("Connexion validée / Login successful","ok")
+    const me=await helix("https://api.twitch.tv/helix/users",t.access_token)
+    const u=me.data[0]
+    const id=u.id
+    const name=u.display_name||u.login
+    log(`Compte: ${name} (ID ${id}) / Account: ${name}`,"muted")
+
+    log("Followers…")
+    const followers=await helixPaged(`https://api.twitch.tv/helix/channels/followers?broadcaster_id=${id}`,t.access_token)
+    log(`Followers: ${followers.length}`,"ok")
+
+    log("Abonnements / Subs…")
+    const subs=await helixPaged(`https://api.twitch.tv/helix/subscriptions?broadcaster_id=${id}`,t.access_token)
+    log(`Subs: ${subs.length}`,"ok")
+
+    log("Modérateurs / Moderators…")
+    const mods=await helixPaged(`https://api.twitch.tv/helix/moderation/moderators?broadcaster_id=${id}`,t.access_token)
+    log(`Mods: ${mods.length}`,"ok")
+
+    log("VIPs…")
+    let vips=[]
+    try{
+      vips=await helixPaged(`https://api.twitch.tv/helix/channels/vips?broadcaster_id=${id}`,t.access_token)
+      log(`VIPs: ${vips.length}`,"ok")
+    }catch(e){
+      log("VIPs: accès refusé / access denied (ignoré)","muted")
+    }
+
+    const prime=new Set(subs.filter(s=>s.tier==="1000").map(s=>s.user_id))
+    const roles=new Map()
+    const mark=(i,n,g)=>{if(!roles.has(i))roles.set(i,{id:i,name:n,tags:new Set()});if(g)roles.get(i).tags.add(g)}
+    followers.forEach(f=>mark(f.user_id,f.user_name,null))
+    mods.forEach(m=>mark(m.user_id,m.user_name,"mod"))
+    vips.forEach(v=>mark(v.user_id,v.user_name,"vip"))
+    subs.forEach(s=>mark(s.user_id,s.user_name,"sub"))
+    const txt=toUsersTxt(roles,prime)
+
+    await copyText(txt)
+    document.getElementById("copied").classList.remove("hidden")
+    document.getElementById("preview").value=txt
+    document.getElementById("previewWrap").classList.remove("hidden")
+    log("Copié dans le presse-papiers / Copied to clipboard ✅","ok")
+
+  }catch(e){
+    console.error(e)
+    log("Erreur / Error: "+e.message,"err")
+    document.getElementById("connect").classList.remove("hidden")
+  }
+}
+
+window.addEventListener("DOMContentLoaded",()=>{
+  document.getElementById("run").addEventListener("click",()=>{location.href=buildAuthUrl()})
+  if(parseHashToken())run()
+  document.getElementById("copyBtn").addEventListener("click",async()=>{
+    const v=document.getElementById("preview").value
+    await copyText(v)
+    document.getElementById("copied").classList.remove("hidden")
+  })
+})
 </script>
 </head>
 <body>

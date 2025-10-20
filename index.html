@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Twitch → users.txt (mods/subs/vips/followers)</title>
+<style>
+  body{font:16px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Arial; margin:2rem; color:#111;}
+  .card{max-width:760px; margin:auto; padding:1.25rem; border:1px solid #ddd; border-radius:12px;}
+  button{padding:.7rem 1rem; border:0; border-radius:10px; cursor:pointer}
+  .primary{background:#9146FF; color:#fff;}
+  .muted{color:#555}
+  code{background:#f6f6f6; padding:0 .35rem; border-radius:6px}
+  .row{display:flex; gap:.75rem; align-items:center; flex-wrap:wrap}
+  .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
+  .log{white-space:pre-wrap; background:#fafafa; border:1px dashed #ddd; padding:.75rem; border-radius:8px; font-size:.9rem; color:#333}
+  .ok{color:#0a0}
+  .err{color:#c00}
+</style>
+<script>
+/*** === CONFIG À RENSEIGNER === ***/
+const CLIENT_ID    = "TON_CLIENT_ID";                 // <= ← Mets ton Client ID ici
+const REDIRECT_URI = "https://tonsite.github.io/tonpage/"; // <= ← Mets l’URL HTTPS exacte de cette page
+
+// Scopes nécessaires (tu peux en retirer si tu veux moins de rôles)
+const SCOPES = [
+  "channel:read:subscriptions", // subs
+  "moderation:read",            // mods
+  "moderator:read:vip"          // VIPs
+];
+
+/*** === LOGIQUE OAUTH IMPLICIT FLOW (100% front) === ***/
+function buildAuthUrl() {
+  const auth = new URL("https://id.twitch.tv/oauth2/authorize");
+  auth.searchParams.set("client_id", CLIENT_ID);
+  auth.searchParams.set("redirect_uri", REDIRECT_URI);
+  auth.searchParams.set("response_type", "token");     // implicit grant
+  auth.searchParams.set("scope", SCOPES.join(" "));
+  auth.searchParams.set("force_verify", "true");
+  return auth.toString();
+}
+
+function parseHashToken() {
+  if (!location.hash) return null;
+  const p = new URLSearchParams(location.hash.slice(1));
+  const access_token = p.get("access_token");
+  const scope = p.get("scope");
+  const token_type = p.get("token_type");
+  return access_token ? { access_token, scope, token_type } : null;
+}
+
+function clearHash() { history.replaceState(null, "", location.pathname + location.search); }
+
+/*** === APPELS HELIX === ***/
+async function helix(url, token) {
+  const res = await fetch(url, {
+    headers: { "Client-ID": CLIENT_ID, "Authorization": `Bearer ${token}` }
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText} – ${url}`);
+  return await res.json();
+}
+
+async function helixPaged(url, token) {
+  let out = [];
+  let after = null;
+  do {
+    const full = after ? (url + (url.includes("?") ? "&" : "?") + "after=" + encodeURIComponent(after)) : url;
+    const j = await helix(full, token);
+    if (j.data) out = out.concat(j.data);
+    after = j.pagination && j.pagination.cursor ? j.pagination.cursor : null;
+  } while (after);
+  return out;
+}
+
+/*** === GÉNÉRATION USERS.TXT === ***/
+function toUsersTxt(roles, primeSet) {
+  // roles: Map user_id -> {name, tags:Set()}
+  const arr = Array.from(roles.values()).sort((a,b)=>a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+  const lines = [];
+  for (const r of arr) {
+    const tags = r.tags;
+    let t = "";
+    if (tags.has("staff")) t += "[staff]";
+    if (tags.has("mod"))   t += "[mod]";
+    if (tags.has("vip"))   t += "[vip]";
+    if (tags.has("sub")) {
+      t += "[sub]";
+      if (primeSet.has(r.id)) t += "[prime]";
+    }
+    lines.push(t ? `${t} ${r.name}` : r.name);
+  }
+  return lines.join("\n") + "\n";
+}
+
+function download(filename, text) {
+  const blob = new Blob([text], {type:"text/plain;charset=utf-8"});
+  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: filename });
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+  a.remove();
+}
+
+/*** === UI HELPERS === ***/
+function log(msg, cls="") {
+  const el = document.getElementById("log");
+  const line = document.createElement("div");
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  el.appendChild(line);
+}
+
+async function main() {
+  // 1) Si pas de token dans l’URL → bouton “Se connecter via Twitch”
+  const token = parseHashToken();
+  if (!token) return; // l’UI initiale restera active
+  clearHash();
+
+  document.getElementById("connect").style.display = "none";
+  document.getElementById("run").disabled = true;
+
+  try {
+    log("Connexion validée. Récupération des infos…","ok");
+
+    // Qui suis-je ?
+    const me = await helix("https://api.twitch.tv/helix/users", token.access_token);
+    const user = me.data[0];
+    const broadcasterId = user.id;
+    const displayName   = user.display_name || user.login;
+
+    log(`Compte: ${displayName} (ID ${broadcasterId})`, "muted");
+
+    // Followers
+    log("Followers…");
+    const followers = await helixPaged(`https://api.twitch.tv/helix/channels/followers?broadcaster_id=${broadcasterId}`, token.access_token);
+    log(`Followers: ${followers.length}`, "ok");
+
+    // Subs
+    log("Abonnements…");
+    const subs = await helixPaged(`https://api.twitch.tv/helix/subscriptions?broadcaster_id=${broadcasterId}`, token.access_token);
+    log(`Subs: ${subs.length}`, "ok");
+
+    // Mods
+    log("Modérateurs…");
+    const mods = await helixPaged(`https://api.twitch.tv/helix/moderation/moderators?broadcaster_id=${broadcasterId}&user_id=${broadcasterId}`, token.access_token);
+    log(`Mods: ${mods.length}`, "ok");
+
+    // VIPs
+    log("VIPs…");
+    const vips = await helixPaged(`https://api.twitch.tv/helix/channels/vips?broadcaster_id=${broadcasterId}&user_id=${broadcasterId}`, token.access_token);
+    log(`VIPs: ${vips.length}`, "ok");
+
+    // Prime: pas de flag direct → approx: tier==1000
+    const primeSet = new Set(subs.filter(s=>s.tier==="1000").map(s=>s.user_id));
+
+    // Fusion rôles
+    const roles = new Map(); // id -> {id, name, tags:Set}
+    const mark = (id,name,tag)=>{
+      if (!roles.has(id)) roles.set(id,{id, name, tags:new Set()});
+      if (tag) roles.get(id).tags.add(tag);
+    };
+    followers.forEach(f=>mark(f.user_id, f.user_name, null));
+    mods.forEach(m=>mark(m.user_id, m.user_name, "mod"));
+    vips.forEach(v=>mark(v.user_id, v.user_name, "vip"));
+    subs.forEach(s=>mark(s.user_id, s.user_name, "sub"));
+
+    // Générer et télécharger
+    const txt = toUsersTxt(roles, primeSet);
+    download("users.txt", txt);
+    log("users.txt généré et téléchargé ✅","ok");
+    document.getElementById("done").style.display = "block";
+
+  } catch (e) {
+    console.error(e);
+    log("Erreur: " + e.message, "err");
+    document.getElementById("connect").style.display = "block";
+  }
+}
+
+window.addEventListener("DOMContentLoaded", ()=>{
+  // Bouton "Se connecter"
+  document.getElementById("run").addEventListener("click", ()=>{
+    location.href = buildAuthUrl();
+  });
+  // Si on revient d'OAuth avec le token dans le hash → on lance
+  if (parseHashToken()) main();
+});
+</script>
+</head>
+<body>
+  <div class="card">
+    <h2>Twitch → users.txt</h2>
+    <p class="muted">Génère un fichier <code>users.txt</code> (balises <code>[mod][sub][vip][prime]</code>) pour ton overlay AE. Tout s’exécute dans ton navigateur, aucun serveur.</p>
+    <div id="connect" class="row" style="margin:1rem 0;">
+      <button id="run" class="primary">Se connecter avec Twitch</button>
+      <span class="muted">Tu verras l’écran d’autorisation officielle.</span>
+    </div>
+    <div id="done" style="display:none;margin:.5rem 0;" class="ok">Fini 🎉 — si besoin relance pour régénérer.</div>
+    <div id="log" class="log" style="margin-top:1rem;"></div>
+    <p class="muted" style="margin-top:.75rem">Besoin : cette page doit être servie en <strong>HTTPS</strong>, et déclarée comme <em>Redirect URL</em> dans ta console développeur Twitch.</p>
+  </div>
+</body>
+</html>

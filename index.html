@@ -3,135 +3,55 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Twitch → users.txt</title>
+<title>Twitch → users.txt (clipboard)</title>
 <style>
 body{font:16px/1.4 system-ui,Segoe UI,Roboto,Arial;margin:2rem;color:#111}
 .card{max-width:760px;margin:auto;padding:1.25rem;border:1px solid #ddd;border-radius:12px}
 button{padding:.7rem 1rem;border:0;border-radius:10px;cursor:pointer}
 .primary{background:#9146FF;color:#fff}
+.secondary{background:#111;color:#fff}
 .muted{color:#555}
 code{background:#f6f6f6;padding:0 .35rem;border-radius:6px}
 .row{display:flex;gap:.75rem;align-items:center;flex-wrap:wrap}
 .log{white-space:pre-wrap;background:#fafafa;border:1px dashed #ddd;padding:.75rem;border-radius:8px;font-size:.9rem;color:#333}
 .ok{color:#0a0}
 .err{color:#c00}
+.hidden{display:none}
 </style>
 <script>
 const CLIENT_ID="7xi2njzywyo96uuk3wvtpdapykdqrw"
 const REDIRECT_URI="https://omnescient.github.io/TwitchChatUserGenerator/"
-const SCOPES = [
-  "channel:read:subscriptions",
-  "moderation:read",
-  "channel:read:vips"
-];
-function buildAuthUrl(){
-const u=new URL("https://id.twitch.tv/oauth2/authorize")
-u.searchParams.set("client_id",CLIENT_ID)
-u.searchParams.set("redirect_uri",REDIRECT_URI)
-u.searchParams.set("response_type","token")
-u.searchParams.set("scope",SCOPES.join(" "))
-u.searchParams.set("force_verify","true")
-return u.toString()
-}
-function parseHashToken(){
-if(!location.hash)return null
-const p=new URLSearchParams(location.hash.slice(1))
-const t=p.get("access_token")
-const s=p.get("scope")
-const ty=p.get("token_type")
-return t?{access_token:t,scope:s,token_type:ty}:null
-}
+const SCOPES=["channel:read:subscriptions","moderation:read","channel:read:vips","moderator:read:followers"]
+function buildAuthUrl(){const u=new URL("https://id.twitch.tv/oauth2/authorize");u.searchParams.set("client_id",CLIENT_ID);u.searchParams.set("redirect_uri",REDIRECT_URI);u.searchParams.set("response_type","token");u.searchParams.set("scope",SCOPES.join(" "));u.searchParams.set("force_verify","true");return u.toString()}
+function parseHashToken(){if(!location.hash)return null;const p=new URLSearchParams(location.hash.slice(1));const t=p.get("access_token");const s=p.get("scope");const ty=p.get("token_type");return t?{access_token:t,scope:s,token_type:ty}:null}
 function clearHash(){history.replaceState(null,"",location.pathname+location.search)}
-async function helix(u,t){
-const r=await fetch(u,{headers:{"Client-ID":CLIENT_ID,"Authorization":`Bearer ${t}`}})
-if(!r.ok)throw new Error(`${r.status} ${r.statusText}`)
-return await r.json()
-}
-async function helixPaged(u,t){
-let o=[],a=null
-do{
-const f=a?(u+(u.includes("?")?"&":"?")+"after="+encodeURIComponent(a)):u
-const j=await helix(f,t)
-if(j.data)o=o.concat(j.data)
-a=j.pagination&&j.pagination.cursor?j.pagination.cursor:null
-}while(a)
-return o
-}
-function toUsersTxt(r,p){
-const a=Array.from(r.values()).sort((a,b)=>a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
-const l=[]
-for(const e of a){
-const g=e.tags
-let t=""
-if(g.has("staff"))t+="[staff]"
-if(g.has("mod"))t+="[mod]"
-if(g.has("vip"))t+="[vip]"
-if(g.has("sub")){t+="[sub]";if(p.has(e.id))t+="[prime]"}
-l.push(t?`${t} ${e.name}`:e.name)
-}
-return l.join("\n")+"\n"
-}
-function download(n,x){
-const b=new Blob([x],{type:"text/plain;charset=utf-8"})
-const a=Object.assign(document.createElement("a"),{href:URL.createObjectURL(b),download:n})
-document.body.appendChild(a)
-a.click()
-setTimeout(()=>URL.revokeObjectURL(a.href),1e3)
-a.remove()
-}
-function log(m,c=""){const e=document.getElementById("log");const d=document.createElement("div");if(c)d.className=c;d.textContent=m;e.appendChild(d)}
-async function main(){
-const t=parseHashToken();if(!t)return;clearHash()
-document.getElementById("connect").style.display="none"
-document.getElementById("run").disabled=true
-try{
-log("Connexion validée / Login successful","ok")
-const me=await helix("https://api.twitch.tv/helix/users",t.access_token)
-const u=me.data[0]
-const id=u.id
-const name=u.display_name||u.login
-log(`Compte: ${name} (ID ${id}) / Account: ${name}`,"muted")
-log("Followers…")
-const followers=await helixPaged(`https://api.twitch.tv/helix/channels/followers?broadcaster_id=${id}`,t.access_token)
-log(`Followers: ${followers.length}`,"ok")
-log("Abonnements / Subs…")
-const subs=await helixPaged(`https://api.twitch.tv/helix/subscriptions?broadcaster_id=${id}`,t.access_token)
-log(`Subs: ${subs.length}`,"ok")
-log("Modérateurs / Moderators…")
-const mods=await helixPaged(`https://api.twitch.tv/helix/moderation/moderators?broadcaster_id=${id}&user_id=${id}`,t.access_token)
-log(`Mods: ${mods.length}`,"ok")
-log("VIPs…")
-const vips=await helixPaged(`https://api.twitch.tv/helix/channels/vips?broadcaster_id=${id}&user_id=${id}`,t.access_token)
-log(`VIPs: ${vips.length}`,"ok")
-const prime=new Set(subs.filter(s=>s.tier==="1000").map(s=>s.user_id))
-const roles=new Map()
-const mark=(i,n,g)=>{if(!roles.has(i))roles.set(i,{id:i,name:n,tags:new Set()});if(g)roles.get(i).tags.add(g)}
-followers.forEach(f=>mark(f.user_id,f.user_name,null))
-mods.forEach(m=>mark(m.user_id,m.user_name,"mod"))
-vips.forEach(v=>mark(v.user_id,v.user_name,"vip"))
-subs.forEach(s=>mark(s.user_id,s.user_name,"sub"))
-const txt=toUsersTxt(roles,prime)
-download("users.txt",txt)
-log("users.txt téléchargé / downloaded ✅","ok")
-document.getElementById("done").style.display="block"
-}catch(e){console.error(e);log("Erreur / Error: "+e.message,"err");document.getElementById("connect").style.display="block"}}
-window.addEventListener("DOMContentLoaded",()=>{
-document.getElementById("run").addEventListener("click",()=>{location.href=buildAuthUrl()})
-if(parseHashToken())main()
-})
+async function helix(u,t){const r=await fetch(u,{headers:{"Client-ID":CLIENT_ID,"Authorization":`Bearer ${t}`}});if(!r.ok)throw new Error(`${r.status} ${r.statusText}`);return await r.json()}
+async function helixPaged(u,t){let o=[],a=null;do{const f=a?(u+(u.includes("?")?"&":"?")+"after="+encodeURIComponent(a)):u;const j=await helix(f,t);if(j.data)o=o.concat(j.data);a=j.pagination&&j.pagination.cursor?j.pagination.cursor:null}while(a);return o}
+function toUsersTxt(r,p){const a=Array.from(r.values()).sort((a,b)=>a.name.toLowerCase().localeCompare(b.name.toLowerCase()));const l=[];for(const e of a){const g=e.tags;let t="";if(g.has("staff"))t+="[staff]";if(g.has("mod"))t+="[mod]";if(g.has("vip"))t+="[vip]";if(g.has("sub")){t+="[sub]";if(p.has(e.id))t+="[prime]"}l.push(t?`${t} ${e.name}`:e.name)}return l.join("\n")+"\n"}
+async function copyText(x){await navigator.clipboard.writeText(x)}
+function log(m,c=""){const el=document.getElementById("log");const d=document.createElement("div");if(c)d.className=c;d.textContent=m;el.appendChild(d)}
+async function run(){const t=parseHashToken();if(!t)return;clearHash();document.getElementById("connect").classList.add("hidden");try{log("Connexion validée / Login successful","ok");const me=await helix("https://api.twitch.tv/helix/users",t.access_token);const u=me.data[0];const id=u.id;const name=u.display_name||u.login;log(`Compte: ${name} (ID ${id}) / Account: ${name}`,"muted");log("Followers…");const followers=await helixPaged(`https://api.twitch.tv/helix/channels/followers?broadcaster_id=${id}`,t.access_token);log(`Followers: ${followers.length}`,"ok");log("Abonnements / Subs…");const subs=await helixPaged(`https://api.twitch.tv/helix/subscriptions?broadcaster_id=${id}`,t.access_token);log(`Subs: ${subs.length}`,"ok");log("Modérateurs / Moderators…");const mods=await helixPaged(`https://api.twitch.tv/helix/moderation/moderators?broadcaster_id=${id}&user_id=${id}`,t.access_token);log(`Mods: ${mods.length}`,"ok");log("VIPs…");let vips=[];try{vips=await helixPaged(`https://api.twitch.tv/helix/channels/vips?broadcaster_id=${id}&user_id=${id}`,t.access_token);log(`VIPs: ${vips.length}`,"ok")}catch(e){log("VIPs: accès refusé / access denied (ignoré)","muted")}
+const prime=new Set(subs.filter(s=>s.tier==="1000").map(s=>s.user_id));const roles=new Map();const mark=(i,n,g)=>{if(!roles.has(i))roles.set(i,{id:i,name:n,tags:new Set()});if(g)roles.get(i).tags.add(g)};followers.forEach(f=>mark(f.user_id,f.user_name,null));mods.forEach(m=>mark(m.user_id,m.user_name,"mod"));vips.forEach(v=>mark(v.user_id,v.user_name,"vip"));subs.forEach(s=>mark(s.user_id,s.user_name,"sub"));const txt=toUsersTxt(roles,prime);await copyText(txt);document.getElementById("copied").classList.remove("hidden");document.getElementById("preview").value=txt;document.getElementById("previewWrap").classList.remove("hidden");log("Copié dans le presse-papiers / Copied to clipboard ✅","ok")}catch(e){console.error(e);log("Erreur / Error: "+e.message,"err");document.getElementById("connect").classList.remove("hidden")}}
+window.addEventListener("DOMContentLoaded",()=>{document.getElementById("run").addEventListener("click",()=>{location.href=buildAuthUrl()});if(parseHashToken())run();document.getElementById("copyBtn").addEventListener("click",async()=>{const v=document.getElementById("preview").value;await copyText(v);document.getElementById("copied").classList.remove("hidden")})})
 </script>
 </head>
 <body>
 <div class="card">
-<h2>Twitch → users.txt</h2>
-<p class="muted">Génère / Generate a <code>users.txt</code> file with <code>[mod][sub][vip][prime]</code> tags for your AE overlay. Runs entirely in your browser.</p>
+<h2>Twitch → users.txt (clipboard)</h2>
+<p class="muted">Génère / Generate a list with <code>[mod][sub][vip][prime]</code> tags for your AE overlay. Nothing is stored.</p>
 <div id="connect" class="row" style="margin:1rem 0;">
 <button id="run" class="primary">Se connecter avec Twitch / Sign in with Twitch</button>
 <span class="muted">Autorisez l'accès officiel / Authorize official access</span>
 </div>
-<div id="done" style="display:none;margin:.5rem 0;" class="ok">Terminé / Done 🎉</div>
+<div id="copied" class="ok hidden" style="margin:.25rem 0;">Copié dans le presse-papiers / Copied to clipboard 🎉</div>
+<div id="previewWrap" class="hidden" style="margin:.75rem 0;">
+<div class="row" style="margin-bottom:.5rem;">
+<button id="copyBtn" class="secondary">Copier à nouveau / Copy again</button>
+</div>
+<textarea id="preview" style="width:100%;height:200px;border:1px solid #ddd;border-radius:8px;padding:.5rem;font-family:ui-monospace,Menlo,Consolas,monospace"></textarea>
+</div>
 <div id="log" class="log" style="margin-top:1rem;"></div>
-<p class="muted" style="margin-top:.75rem">Cette page doit être servie en <strong>HTTPS</strong> et déclarée comme <em>Redirect URL</em> dans la console développeur Twitch.<br>This page must be served over <strong>HTTPS</strong> and registered as a <em>Redirect URL</em> in your Twitch Developer Console.</p>
+<p class="muted" style="margin-top:.75rem">Cette page doit être servie en <strong>HTTPS</strong> et enregistrée comme <em>Redirect URL</em> dans la console développeur Twitch.<br/>This page must be served over <strong>HTTPS</strong> and registered as a <em>Redirect URL</em> in your Twitch Developer Console.</p>
 </div>
 </body>
 </html>
